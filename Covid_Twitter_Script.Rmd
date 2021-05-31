@@ -1,0 +1,1946 @@
+---
+title: "Test"
+author: "Cian Brannick O Cillin"
+date: "3/23/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+LOADING & IMPORTING
+--------------------
+```{r}
+#library(rtweet) # for harvesting tweets
+#library(tm) # for text mining
+library(dplyr) 
+library(tidyr)
+library(data.table)
+library(ggplot2)
+library(ggthemes)
+library(magrittr) 
+library(dplyr)    
+#library(e1071) 
+#library(caret) 
+#library(here)
+#install.packages("maps")
+#install.packages("knitr")
+#install.packages("ggplot2")
+#install.packages("ggthemes")
+
+```
+
+Below is the packages necessary for NLP
+------------
+```{r}
+# Install
+#install.packages("tm")  # for text mining
+#install.packages("tmap")  # for text mining
+#install.packages("SnowballC") # for text stemming
+#install.packages("wordcloud") # word-cloud generator 
+#install.packages("RColorBrewer") # color palettes
+#install.packages("syuzhet") # for sentiment analysis
+#install.packages("ggplot2") # for plotting graphs
+#install.packages("NLP") # for plotting graphs
+# Load
+#install.packages("usethis")
+#install.packages("Rcpp", dependencies = TRUE)
+library("tm")
+#library("tmap")
+library("SnowballC")
+library("wordcloud")
+library("RColorBrewer")
+library("syuzhet")
+library("ggplot2")
+#install.packages("tsbox")
+library("tsbox")
+#library(devtools)
+#library(usethis)
+
+```
+
+
+```{r}
+#library(devtools)
+#library(usethis)
+#install_github("kevintaylor/rtweet")
+library(rtweet)
+library("corpus")
+```
+
+TWITTER KEYS & TOKENS
+------------
+```{r}
+api_key <- ""
+api_secret_key <- ""
+access_token <- ""
+access_secret <- ""
+
+
+```
+
+```{r}
+token <- create_token(
+  app = "Ireland_2020",
+  consumer_key = api_key,
+  consumer_secret = api_secret_key,
+  access_token = access_token,
+  access_secret = access_secret)
+```
+
+TOPIC - SEARCHING TWITTER
+
+The below code is used to extract tweets from a speficed time period. The dates were altered and changed to extract a dataset of tweets over 8 months.
+----------------
+```{r}
+q<- 'place_country:IE"covid" lang:en '
+
+Feb01_feb15<-search_fullarchive(q, n = 1, fromDate = "202102010000", toDate = "202102160000", env_name = "IrelandDev", parse = TRUE, token = token)
+
+```
+
+Below is the code to find frequency of posts for a specified time period
+---------------------
+```{r}
+fullData%>%
+  ts_plot("1 week") +
+  ggplot2::theme_minimal() +
+  ggplot2::theme(plot.title = ggplot2::element_text(face = "bold")) +
+  ggplot2::labs(
+    x = NULL, y = NULL,
+    title = "Frequency of Twitter statuses continaing 'covid'ts from past 8 Months",
+    subtitle = "Twitter status (tweet) counts aggregated using 1 day intervals",
+    caption = "\nSource: Data collected from Twitter's REST API via rtweet"
+  )
+
+```
+
+
+Data Cleanning & PROCESSING
+--------------------------------------------
+```{r}
+TestDataSet<- fullData
+
+TestDataSet$text<-gsub("@\\w+ *", "", TestDataSet$text) # This removes @ which mention people
+TestDataSet$text<-gsub("http\\S+","", TestDataSet$text) # This removes links
+TestDataSet$text<-(gsub("[^\x01-\x7F]", "", TestDataSet$text)) # This removes emojis
+
+TextDoc <- Corpus(VectorSource(TestDataSet$text))
+
+
+toSpace <- content_transformer(function (x , pattern ) gsub(pattern, " ", x))
+
+TextDoc <- tm_map(TextDoc, toSpace, "/")
+TextDoc <- tm_map(TextDoc, toSpace, "@")
+TextDoc <- tm_map(TextDoc, toSpace, "\\|")
+# Convert the text to lower case
+TextDoc <- tm_map(TextDoc, content_transformer(tolower))
+# Remove numbers
+TextDoc <- tm_map(TextDoc, removeNumbers)
+# Remove english common stopwords
+TextDoc <- tm_map(TextDoc, removeWords, stopwords("english"))
+# Remove your own stop word
+# specify your custom stopwords as a character vector
+TextDoc <- tm_map(TextDoc, removeWords, c("covid","amp")) 
+# Remove punctuations
+TextDoc <- tm_map(TextDoc, removePunctuation)
+# Eliminate extra white spaces
+TextDoc <- tm_map(TextDoc, stripWhitespace)
+#This removes any duplicate tweets
+#TestDataSet<-distinct(TestDataSet,text, .keep_all = TRUE)
+
+TestDataSet$NewTweet<-data.frame(text = sapply(TextDoc, as.character), stringsAsFactors = FALSE)
+
+```
+
+TOPIC- SENTIMENT & EMOTION ANALYSIS 
+---------------------------------
+
+The below code will preform Sentiment Analsyis
+-------------------------------------
+```{r}
+
+syuzhet_vector <- get_sentiment(TestDataSet$text, method="syuzhet")
+# see the first row of the vector
+head(syuzhet_vector)
+# see summary statistics of the vector
+summary(syuzhet_vector)
+
+# bing
+bing_vector <- get_sentiment(TestDataSet$text, method="bing")
+head(bing_vector)
+summary(bing_vector)
+#affin
+afinn_vector <- get_sentiment(TestDataSet$text, method="afinn")
+head(afinn_vector)
+summary(afinn_vector)
+
+#compare the first row of each vector using sign function
+rbind(
+  sign(head(syuzhet_vector)),
+  sign(head(bing_vector)),
+  sign(head(afinn_vector))
+)
+
+TestDataSet$bing_sentiment = bing_vector
+TestDataSet$afin_sentiment = afinn_vector
+TestDataSet$syuzhet_sentiment = syuzhet_vector
+
+
+
+```
+
+Below will code extract emotion from our tweets
+--------------------------------
+```{r}
+# run nrc sentiment analysis to return data frame with each row classified as one of the following
+# emotions, rather than a score: 
+# anger, anticipation, disgust, fear, joy, sadness, surprise, trust 
+# It also counts the number of positive and negative emotions found in each row
+emotions<-get_nrc_sentiment(TestDataSet$text)
+head (emotions,10)
+```
+
+```{r}
+emotionTestDataSet$emotions<-emotions
+```
+
+```{r}
+#transpose
+td<-data.frame(t(emotions))
+#The function rowSums computes column sums across rows for each level of a grouping variable.
+td_new <- data.frame(rowSums(td[2:27224]))
+#Transformation and cleaning
+names(td_new)[1] <- "count"
+td_new <- cbind("sentiment" = rownames(td_new), td_new)
+rownames(td_new) <- NULL
+td_new2<-td_new[1:8,]
+
+```
+
+#Plot two - count of words associated with each sentiment, expressed as a percentage
+
+```{r}
+
+barplot(
+  sort(colSums(prop.table(emotions[, 1:10]))), 
+  horiz = TRUE, 
+  cex.names = 0.7, 
+  cex.axis = 1,
+  las = 1, 
+  main = "Emotions in Text 2021", xlab="Percentage"
+)
+
+```
+
+
+The below code will group by day and aggregate the scores of the sentiment for the day
+---------------------------------------------------------------------------------
+```{r}
+Temp<-emotionTestDataSet
+
+# use dplyr and mutate to add a day column to your data and chage the format to y-m-d
+ Temp$day<-Temp %>%
+  mutate(day = as.Date(Temp$created_at, format = "%Y-%m-%d"))
+
+glimpse(Temp)
+
+#This creates the day column to be used in the grouping
+Temp$day<- as.Date(Temp$created_at)
+
+#This then aggregates the days by the sum (Best to use mean cause volume wont be the same on everday)
+Syuzhet_sentiment<-aggregate(Temp$syuzhet_sentiment, by=list(Temp$day), mean)
+sentimentR_Sent<-aggregate(Temp$sentimentR, by=list(Temp$day), mean)
+Afin_sentiment<-aggregate(Temp$afin_sentiment, by=list(Temp$day), mean)
+Bing_sentiment<-aggregate(Temp$bing_sentiment, by=list(Temp$day), mean)
+```
+
+The below code will group by day and aggregate the emotions socres for each emotion type.
+---------------------
+```{r}
+
+
+# use dplyr and mutate to add a day column to your data and chage the format to y-m-d
+ emotionTestDataSet$day<-emotionTestDataSet %>%
+  mutate(day = as.Date(emotionTestDataSet$created_at, format = "%Y-%m-%d"))
+
+#This creates the day column to be used in the grouping
+emotionTestDataSet$day<- as.Date(Temp$created_at)
+
+#This then aggregates the days by the sum (Best to use mean cause volume wont be the same on everday)
+AllDay_Emotions<-aggregate(emotionTestDataSet$emotions$fear, by=list(emotionTestDataSet$day), mean)
+tempEmotion<-aggregate(emotionTestDataSet$emotions$anticipation, by=list(emotionTestDataSet$day), mean)
+AllDay_Emotions$Anticipation<-tempEmotion$x
+tempEmotion<-aggregate(emotionTestDataSet$emotions$disgust, by=list(emotionTestDataSet$day), mean)
+AllDay_Emotions$disgust<-tempEmotion$x
+tempEmotion<-aggregate(emotionTestDataSet$emotions$joy, by=list(emotionTestDataSet$day), mean)
+AllDay_Emotions$joy<-tempEmotion$x
+tempEmotion<-aggregate(emotionTestDataSet$emotions$sadness, by=list(emotionTestDataSet$day), mean)
+AllDay_Emotions$sadness<-tempEmotion$x
+tempEmotion<-aggregate(emotionTestDataSet$emotions$surprise, by=list(emotionTestDataSet$day), mean)
+AllDay_Emotions$surprise<-tempEmotion$x
+tempEmotion<-aggregate(emotionTestDataSet$emotions$trust, by=list(emotionTestDataSet$day), mean)
+AllDay_Emotions$trust<-tempEmotion$x
+tempEmotion<-aggregate(emotionTestDataSet$emotions$anger, by=list(emotionTestDataSet$day), mean)
+AllDay_Emotions$trust<-tempEmotion$x
+
+AllDay_Emotions<-AllDay_Emotions %>% 
+  rename(
+    Date = Group.1,
+    fear = x
+    )
+
+```
+
+The below code creates our table that combines 3 sentiment tables which have been summed on their days
+
+```{r}
+SummedSentiments<-Bing_sentiment
+SummedSentiments$SyuzhetSentiment <- Syuzhet_sentiment$x
+SummedSentiments$AffinSentiment<- Afin_sentiment$x
+SummedSentiments<-SummedSentiments %>% 
+  rename(
+    Date = Group.1,
+    BingSentiment = x
+    )
+SummedSentiments<-SummedSentiments %>% select(-addedDays)
+
+```
+
+All Data sentiment methods results plotted 
+----------------------
+
+```{r}
+# Using ggplot to plot
+ggplot(SummedSentiments, aes(x = Date, y = SyuzhetSentiment)) +
+    geom_line(color = "steelblue") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(
+        x = "Time",
+        y = "Sentiment Score",
+        title = paste(
+            "Twitter Sentiment for 'covid' from August 1st 2020 - March 22nd 2021 (Syuzhet)"
+        )
+    ) 
+
+# Using ggplot to plot
+ggplot(SummedSentiments, aes(x = Date, y = AffinSentiment)) +
+    geom_line(color = "steelblue") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(
+        x = "Time",
+        y = "Sentiment Score",
+        title = paste(
+            "Twitter Sentiment for 'covid' from August 1st 2020 - March 22nd 2021 (Afin)"
+        )
+    ) 
+
+# Using ggplot to plot
+ggplot(SummedSentiments, aes(x = Date, y = BingSentiment)) +
+    geom_line(color = "steelblue") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(
+        x = "Time",
+        y = "Sentiment Score",
+        title = paste(
+            "Twitter Sentiment for 'covid' from August 1st 2020 - March 22nd 2021 (Bing)"
+        )
+    ) 
+
+#Here we are changing the format of the date axis to show weeks
+
+colors <- c("Afin Sentiment" = "blue", "Bing Sentiment" = "red", "Syuzhet Sentiment" = "green")
+
+AllData_SentMethods<-ggplot(SummedSentiments, aes(x = Date)) +
+    geom_smooth(aes(y = BingSentiment, color = "Bing Sentiment"), size = 1.5) +
+    geom_smooth(aes(y = SyuzhetSentiment, color = "Syuzhet Sentiment"), size = 1.5) + 
+   geom_smooth(aes(y = AffinSentiment, color = "Afin Sentiment"), size = 1.5) +
+  
+  
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 0-52)",
+         y = "(Sentiment Levels)",
+         title = paste(
+            "All Sentiment Methods Plotted August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+```
+
+```{r}
+print(AllData_SentMethods)
+```
+
+
+ALl DATA Emotions PLotted 
+-------
+```{r}
+colors <- c("Fear" = "black", "Joy" = "red", "Sadness" = "orange", "Anticipation" = "blue", "Trust" = "white" ,"Disgust" = "yellow", "surprise" = "purple", "Anger" = "brown")
+
+AllDATA_Emotions<-ggplot(AllDay_Emotions, aes(x = Date )) +
+    geom_smooth(aes(y = fear, color = "Fear"), size = 1.5) +
+    geom_smooth(aes(y = Anticipation, color = "Anticipation"), size = 1.5) +  
+geom_smooth(aes(y = trust, color = "Trust"), size = 1.5) +  
+  geom_smooth(aes(y = disgust, color = "Disgust"), size = 1.5) +
+  geom_smooth(aes(y = joy, color = "Joy"), size = 1.5) +
+  geom_smooth(aes(y = sadness, color = "Sadness"), size = 1.5) +
+  geom_smooth(aes(y = surprise, color = "Surprise"), size = 1.5) +
+  geom_smooth(aes(y = surprise, color = "Anger"), size = 1.5) +
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 0-52)",
+         y = "(Mean Emotion Values)",
+         title = paste(
+            "Twitter Emotion Levels from Aug 1st 20' - Mar 22nd 21'"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+    
+```
+
+```{r}
+print(AllDATA_Emotions)
+```
+
+
+
+
+```{r}
+# This code creates a date range for all our data
+
+Christmass_Period<-Ireland2020_2021_covid %>%
+  select(day,ConfirmedCovidCases,Syuzhet,Bing_Sent,Afin_Sent,SentimentR) %>%
+  filter(day >= "2020-12-01" & day <="2021-02-01")
+
+```
+
+TOPIC - M3 AGE AND GENDER PREDICTION
+----------------------------------
+
+Below we are creating a unique list of users
+------------------------
+```{r}
+#duplicated(users$List_Users)
+#users$List_Users[!duplicated(users$List_Users)]
+#UniqueUsers<-users$List_Users[!duplicated(users$List_Users)]
+UniqueUsers<-data.frame(UniqueUsers)
+```
+
+```{r}
+duplicated(Unique_ids$Unique_ids)
+Unique_ids<-All_ids$`Jan_Feb$user_id`[!duplicated(All_ids$`Jan_Feb$user_id`)]
+Unique_ids<- data.frame(Unique_ids)
+```
+
+```{r}
+write.csv(Unique_ids,"Desktop\\uniqueids", row.names = TRUE)
+```
+
+```{r}
+UniqueUsers_Predicted<-read.csv(file.choose())
+```
+
+FULL BREAKDOWN OF EACH UNIQUE USERS GROUP WIHTIN THE DATASET (USE FOR DATASET STATS) Not reflective of tweets.
+--------------------------
+```{r}
+table(UniqueUsers_Predicted$Org.NonOrg)
+table(UniqueUsers_Predicted$Gender)
+table(UniqueUsers_Predicted$under.Over45)
+table(UniqueUsers_Predicted$Gender,UniqueUsers_Predicted$under.Over45)
+```
+
+This Backups up the fact we have a rule that anything over 0.5 is classified as Male or Female.
+-----------------
+```{r}
+hist(UniqueUsers_Predicted$Male_Pre, breaks=25)
+hist(UniqueUsers_Predicted$Female_Pre, breaks=25)
+```
+
+Below will merge our Predicted User list with our tweets list.
+---------------------
+```{r}
+joined_df <- merge(emotionTestDataSet, UniqueUsers_Predicted, by.x = "screen_name",by.y = "Screen_Name", all.x = TRUE, all.y = FALSE)
+```
+
+Stats for our joined Dataset
+------------------------
+```{r}
+table(joined_df$Gender)
+table(joined_df$under.Over45)
+table(joined_df$Gender,joined_df$under.Over45)
+table(joined_df$Org.NonOrg)
+
+```
+
+
+
+TOPIC - GENDER ANALYSIS
+---------------------------------------
+
+
+The below code creates the different data frame for comparisons e.g male vs female
+-------------------------------------------------------------------------
+```{r}
+femaleDATA<-joined_df[which(joined_df$Gender == "Female"),names(joined_df) %in% c("text","created_at","bing_sentiment","afin_sentiment","syuzhet_sentiment","fear","Anticipation","disgust","joy","saddness","trust","suprise", "proTweet")]
+maleDATA<-joined_df[which(joined_df$Gender == "Male"),names(joined_df) %in% c("text","created_at","bing_sentiment","afin_sentiment","syuzhet_sentiment","fear","Anticipation","disgust","joy","saddness","trust","suprise", "proTweet")]
+
+```
+
+Female Sentiment & Emotion Grouped by day 
+-------
+```{r}
+
+#femaleEmotions<- get_nrc_sentiment(femaleDATA$text)
+
+femaleDATA$emotions<-femaleEmotions
+
+# use dplyr and mutate to add a day column to your data and chage the format to y-m-d
+ femaleDATA$day<- as.Date(femaleDATA$created_at, format = "%Y-%m-%d")
+
+#This then aggregates the days by the sum (Best to use mean cause volume wont be the same on everday)
+FemaleSentiment_Emotion<-aggregate(femaleDATA$bing_sentiment, by=list(femaleDATA$day), mean)
+tempFemale<-aggregate(femaleDATA$afin_sentiment, by=list(femaleDATA$day), mean)
+FemaleSentiment_Emotion$Afin_Sentiment <- tempFemale$x
+tempFemale<-aggregate(femaleDATA$syuzhet_sentiment, by=list(femaleDATA$day), mean)
+FemaleSentiment_Emotion$Syuzhet_sentiment <- tempFemale$x
+
+tempEmotion<-aggregate(femaleDATA$emotions$fear, by=list(femaleDATA$day), mean)
+FemaleSentiment_Emotion$fear<-tempEmotion$x
+tempEmotion<-aggregate(femaleDATA$emotions$anticipation, by=list(femaleDATA$day), mean)
+FemaleSentiment_Emotion$Anticipation<-tempEmotion$x
+tempEmotion<-aggregate(femaleDATA$emotions$disgust, by=list(femaleDATA$day), mean)
+FemaleSentiment_Emotion$disgust<-tempEmotion$x
+tempEmotion<-aggregate(femaleDATA$emotions$joy, by=list(femaleDATA$day), mean)
+FemaleSentiment_Emotion$joy<-tempEmotion$x
+tempEmotion<-aggregate(femaleDATA$emotions$sadness, by=list(femaleDATA$day), mean)
+FemaleSentiment_Emotion$sadness<-tempEmotion$x
+tempEmotion<-aggregate(femaleDATA$emotions$surprise, by=list(femaleDATA$day), mean)
+FemaleSentiment_Emotion$surprise<-tempEmotion$x
+tempEmotion<-aggregate(femaleDATA$emotions$trust, by=list(femaleDATA$day), mean)
+FemaleSentiment_Emotion$trust<-tempEmotion$x
+tempEmotion<-aggregate(femaleDATA$emotions$anger, by=list(femaleDATA$day), mean)
+FemaleSentiment_Emotion$anger<-tempEmotion$x
+
+FemaleSentiment_Emotion<-FemaleSentiment_Emotion %>% 
+  rename(
+    Date = Group.1,
+    BingSentiment = x
+    )
+
+```
+
+Male Sentiment Grouped by day and ploted
+-------------
+
+```{r}
+
+#maleEmotions<- get_nrc_sentiment(maleDATA$text)
+
+maleDATA$emotions<-maleEmotions
+
+# use dplyr and mutate to add a day column to your data and chage the format to y-m-d
+ maleDATA$day<- as.Date(maleDATA$created_at, format = "%Y-%m-%d")
+
+#This then aggregates the days by the sum (Best to use mean cause volume wont be the same on everday)
+maleSentiment_Emotion<-aggregate(maleDATA$bing_sentiment, by=list(maleDATA$day), mean)
+tempMale<-aggregate(maleDATA$afin_sentiment, by=list(maleDATA$day), mean)
+maleSentiment_Emotion$Afin_Sentiment <- tempMale$x
+tempMale<-aggregate(maleDATA$syuzhet_sentiment, by=list(maleDATA$day), mean)
+maleSentiment_Emotion$Syuzhet_sentiment <- tempMale$x
+
+tempEmotion<-aggregate(maleDATA$emotions$fear, by=list(maleDATA$day), mean)
+maleSentiment_Emotion$fear<-tempEmotion$x
+tempEmotion<-aggregate(maleDATA$emotions$anticipation, by=list(maleDATA$day), mean)
+maleSentiment_Emotion$Anticipation<-tempEmotion$x
+tempEmotion<-aggregate(maleDATA$emotions$disgust, by=list(maleDATA$day), mean)
+maleSentiment_Emotion$disgust<-tempEmotion$x
+tempEmotion<-aggregate(maleDATA$emotions$joy, by=list(maleDATA$day), mean)
+maleSentiment_Emotion$joy<-tempEmotion$x
+tempEmotion<-aggregate(maleDATA$emotions$sadness, by=list(maleDATA$day), mean)
+maleSentiment_Emotion$sadness<-tempEmotion$x
+tempEmotion<-aggregate(maleDATA$emotions$surprise, by=list(maleDATA$day), mean)
+maleSentiment_Emotion$surprise<-tempEmotion$x
+tempEmotion<-aggregate(maleDATA$emotions$trust, by=list(maleDATA$day), mean)
+maleSentiment_Emotion$trust<-tempEmotion$x
+tempEmotion<-aggregate(maleDATA$emotions$anger, by=list(maleDATA$day), mean)
+maleSentiment_Emotion$anger<-tempEmotion$x
+
+maleSentiment_Emotion<-maleSentiment_Emotion %>% 
+  rename(
+    Date = Group.1,
+    BingSentiment = x
+    )
+```
+
+
+Male & Female Sentiment Ploted
+---------------------
+```{r}
+
+colors <- c("Male Sentiment" = "blue", "Female Sentiment" = "red")
+
+M_F_Sent_Bing<-ggplot(FemaleSentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = BingSentiment, color = "Female Sentiment"), size = 1.5) +
+    geom_smooth(aes(y = maleSentiment_Emotion$BingSentiment, color = "Male Sentiment"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) + 
+    labs(x = "Time (Weeks 0-52)",
+         y = "(Sentiment Levels)",
+         title = paste(
+            "Twitter Bing Sentiment Levels for Males vs Females Aug 1st 20' - Mar 22nd 21'"
+        ) ,
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+
+M_F_Sent_Afin<-ggplot(FemaleSentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = Afin_Sentiment, color = "Female Sentiment"), size = 1.5) +
+    geom_smooth(aes(y = maleSentiment_Emotion$Afin_Sentiment, color = "Male Sentiment"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) + 
+    labs(x = "Time (Weeks 0-52)",
+         y = "(Sentiment Levels)",
+         title = paste(
+            "Twitter Afin Sentiment Levels for Males vs Females Aug 1st 20' - Mar 22nd 21'"
+        ) ,
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+
+M_F_Sent_Syuzhet<-ggplot(FemaleSentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = Syuzhet_sentiment, color = "Female Sentiment"), size = 1.5) +
+    geom_smooth(aes(y = maleSentiment_Emotion$BingSentiment, color = "Male Sentiment"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) + 
+    labs(x = "Time (Weeks 0-52)",
+         y = "(Sentiment Levels)",
+         title = paste(
+            "Twitter Syuzhet Sentiment Levels for Males vs Females Aug 1st 20' - Mar 22nd 21'"
+        ) ,
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+
+
+```
+
+```{r}
+print(M_F_Sent_Afin)
+print(M_F_Sent_Bing)
+print(M_F_Sent_Syuzhet)
+```
+
+
+All Female Emotions
+-------------------------
+```{r}
+
+colors <- c("Fear" = "black", "Joy" = "red", "Sadness" = "orange", "Anticipation" = "blue", "trust" = "white" ,"disgust" = "yellow", "surprise" = "purple", "anger" = "brown")
+
+All_FemaleEmotions<-ggplot(FemaleSentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = fear, color = "Fear"), size = 1.5) +
+    geom_smooth(aes(y = Anticipation, color = "Anticipation"), size = 1.5) +  
+geom_smooth(aes(y = trust, color = "trust"), size = 1.5) +  
+  geom_smooth(aes(y = disgust, color = "disgust"), size = 1.5) +
+  geom_smooth(aes(y = joy, color = "Joy"), size = 1.5) +
+  geom_smooth(aes(y = sadness, color = "Sadness"), size = 1.5) +
+  geom_smooth(aes(y = surprise, color = "surprise"), size = 1.5) +
+  geom_smooth(aes(y = surprise, color = "anger"), size = 1.5) +
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+     labs(x = "Time (Weeks 1-52)",
+         y = "(Mean Emotion Values)",
+         title = paste(
+            "Twitter Emotion Levels for Females August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+```
+
+All Male Emotions
+----------------------
+```{r}
+
+colors <- c("Fear" = "black", "Joy" = "red", "Sadness" = "orange", "Anticipation" = "blue", "trust" = "white" ,"disgust" = "yellow", "surprise" = "purple", "anger" = "brown" )
+
+All_MaleEmotions<-ggplot(maleSentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = fear, color = "Fear"), size = 1.5) +
+    geom_smooth(aes(y = Anticipation, color = "Anticipation"), size = 1.5) +  
+geom_smooth(aes(y = trust, color = "trust"), size = 1.5) +  
+  geom_smooth(aes(y = disgust, color = "disgust"), size = 1.5) +
+  geom_smooth(aes(y = joy, color = "Joy"), size = 1.5) +
+  geom_smooth(aes(y = sadness, color = "Sadness"), size = 1.5) +
+  geom_smooth(aes(y = surprise, color = "surprise"), size = 1.5) +
+  geom_smooth(aes(y = surprise, color = "anger"), size = 1.5) +
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 1-52)",
+         y = "(Mean Emotion Values)",
+         title = paste(
+            "Twitter Emotion Levels for Males August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+```
+
+```{r}
+print(All_MaleEmotions)
+print(All_FemaleEmotions)
+```
+
+
+Male vs Female Comparision for emotions
+-------------------------------
+
+```{r}
+# Fear
+
+colors <- c("Male Fear" = "blue", "Female Fear" = "red")
+
+MaleVSfemale_fear<-ggplot(FemaleSentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = fear, color = "Female Fear"), size = 1.5) +
+    geom_smooth(aes(y = maleSentiment_Emotion$fear, color = "Male Fear"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time",
+         y = "(%)",
+         title = paste(
+            "Twitter Fear Levels for Males vs Females August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+# Saddness
+    
+colors <- c("Male Saddness" = "blue", "Female Saddness" = "red")
+
+MaleVSfemale_sad<-ggplot(FemaleSentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = sadness, color = "Female Saddness"), size = 1.5) +
+    geom_smooth(aes(y = maleSentiment_Emotion$sadness, color = "Male Saddness"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time",
+         y = "(%)",
+         title = paste(
+            "Twitter Saddness Levels for Males vs Females August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+    
+    
+# Anticipation
+  
+colors <- c("Female Anticipation" = "blue", "Male Anticipation" = "red")
+
+MaleVSfemale_Anticipation<-ggplot(FemaleSentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = Anticipation, color = "Female Anticipation"), size = 1.5) +
+    geom_smooth(aes(y = maleSentiment_Emotion$Anticipation, color = "Male Anticipation"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time",
+         y = "(%)",
+         title = paste(
+            "Twitter Anticipation Levels for Males vs Females August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+    
+# Joy
+  
+colors <- c("Female Joy" = "blue", "Female Joy" = "red")
+
+MaleVSfemale_joy<-ggplot(FemaleSentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = joy, color = "Female joy"), size = 1.5) +
+    geom_smooth(aes(y = maleSentiment_Emotion$joy, color = "Male joy"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time",
+         y = "(%)",
+         title = paste(
+            "Twitter joy Levels for Males vs Females August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors)     
+
+# Disgust
+  
+colors <- c("Female disgust" = "blue", "Female disgust" = "red")
+
+MaleVSfemale_disgust<-ggplot(FemaleSentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = disgust, color = "Female disgust"), size = 1.5) +
+    geom_smooth(aes(y = maleSentiment_Emotion$disgust, color = "Male disgust"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time",
+         y = "(%)",
+         title = paste(
+            "Twitter disgust Levels for Males vs Females August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors)          
+    
+# trust
+  
+colors <- c("Female trust" = "blue", "Male trust" = "red")
+
+MaleVSfemale_trust<-ggplot(FemaleSentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = trust, color = "Female trust"), size = 1.5) +
+    geom_smooth(aes(y = maleSentiment_Emotion$trust, color = "Male trust"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time",
+         y = "(%)",
+         title = paste(
+            "Twitter trust Levels for Males vs Females August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors)    
+    
+# Suprise
+  
+colors <- c("Female surprise" = "blue", "Male surprise" = "red")
+
+MaleVSfemale_suprise<-ggplot(FemaleSentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = surprise, color = "Female surprise"), size = 1.5) +
+    geom_smooth(aes(y = maleSentiment_Emotion$surprise, color = "Male surprise"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time",
+         y = "(%)",
+         title = paste(
+            "Twitter surpise Levels for Males vs Females August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors)    
+    
+    
+# Anger
+  
+colors <- c("Female anger" = "blue", "Male anger" = "red")
+
+MaleVSfemale_anger<-ggplot(FemaleSentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = surprise, color = "Female anger"), size = 1.5) +
+    geom_smooth(aes(y = maleSentiment_Emotion$surprise, color = "Male anger"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time",
+         y = "(%)",
+         title = paste(
+            "Twitter Anger Levels for Males vs Females August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors)  
+    
+```
+
+
+```{r}
+print(MaleVSfemale_anger)
+print(MaleVSfemale_Anticipation)
+print(MaleVSfemale_disgust)
+print(MaleVSfemale_joy)
+print(MaleVSfemale_sad)
+print(MaleVSfemale_suprise)
+print(MaleVSfemale_trust)
+print(MaleVSfemale_fear)
+
+```
+
+
+TOPIC - AGE ANALYSIS 
+-------------------------
+
+The below Analysis will provide us with the necessary graphs and results for our variable for Age
+Our focus is under & Over 45s 
+-------------------------------------------------------------------------------------
+
+The below code will provide us with 2 Datasets for both under & Over 45s 
+------------
+ 
+```{r}
+Under45_DATA<-joined_df[which(joined_df$under.Over45 == "Under45"),names(joined_df) %in% c("text","created_at","bing_sentiment","afin_sentiment","syuzhet_sentiment","fear","Anticipation","disgust","joy","saddness","trust","suprise","day","proTweet")]
+Over45_DATA<-joined_df[which(joined_df$under.Over45 == "Over45"),names(joined_df) %in% c("text","created_at","bing_sentiment","afin_sentiment","syuzhet_sentiment","fear","Anticipation","disgust","joy","saddness","trust","suprise", "day","proTweet")]
+
+```
+
+
+Under 45s Sentiment & Emotion Grouped by day 
+----------------
+```{r}
+
+#Under45_DATA$emotions<-get_nrc_sentiment(Under45_DATA$text)
+
+# use dplyr and mutate to add a day column to your data and chage the format to y-m-d
+#Under45_DATA$day<- as.Date(Under45_DATA$created_at, format = "%Y-%m-%d")
+
+#This then aggregates the days by the sum (Best to use mean cause volume wont be the same on everday)
+Under45_Sentiment_Emotion<-aggregate(Under45_DATA$bing_sentiment, by=list(Under45_DATA$day), mean)
+tempU45<-aggregate(Under45_DATA$afin_sentiment, by=list(Under45_DATA$day), mean)
+Under45_Sentiment_Emotion$Afin_Sentiment <- tempU45$x
+tempU45<-aggregate(Under45_DATA$syuzhet_sentiment, by=list(Under45_DATA$day), mean)
+Under45_Sentiment_Emotion$Syuzhet_sentiment <- tempU45$x
+
+tempEmotion<-aggregate(Under45_DATA$emotions$fear, by=list(Under45_DATA$day), mean)
+Under45_Sentiment_Emotion$fear<-tempEmotion$x
+tempEmotion<-aggregate(Under45_DATA$emotions$anticipation, by=list(Under45_DATA$day), mean)
+Under45_Sentiment_Emotion$Anticipation<-tempEmotion$x
+tempEmotion<-aggregate(Under45_DATA$emotions$disgust, by=list(Under45_DATA$day), mean)
+Under45_Sentiment_Emotion$disgust<-tempEmotion$x
+tempEmotion<-aggregate(Under45_DATA$emotions$joy, by=list(Under45_DATA$day), mean)
+Under45_Sentiment_Emotion$joy<-tempEmotion$x
+tempEmotion<-aggregate(Under45_DATA$emotions$sadness, by=list(Under45_DATA$day), mean)
+Under45_Sentiment_Emotion$sadness<-tempEmotion$x
+tempEmotion<-aggregate(Under45_DATA$emotions$surprise, by=list(Under45_DATA$day), mean)
+Under45_Sentiment_Emotion$surprise<-tempEmotion$x
+tempEmotion<-aggregate(Under45_DATA$emotions$trust, by=list(Under45_DATA$day), mean)
+Under45_Sentiment_Emotion$trust<-tempEmotion$x
+tempEmotion<-aggregate(Under45_DATA$emotions$anger, by=list(Under45_DATA$day), mean)
+Under45_Sentiment_Emotion$anger<-tempEmotion$x
+
+Under45_Sentiment_Emotion<-Under45_Sentiment_Emotion %>% 
+  rename(
+    Date = Group.1,
+    BingSentiment = x
+    )
+
+```
+
+Over 45s Sentiment & Emotion Grouped by day 
+-----------------
+```{r}
+
+#Over45_DATA$emotions<-get_nrc_sentiment(Over45_DATA$text)
+
+# use dplyr and mutate to add a day column to your data and chage the format to y-m-d
+#Under45_DATA$day<- as.Date(Under45_DATA$created_at, format = "%Y-%m-%d")
+
+#This then aggregates the days by the sum (Best to use mean cause volume wont be the same on everday)
+Over45_Sentiment_Emotion<-aggregate(Over45_DATA$bing_sentiment, by=list(Over45_DATA$day), mean)
+tempU45<-aggregate(Over45_DATA$afin_sentiment, by=list(Over45_DATA$day), mean)
+Over45_Sentiment_Emotion$Afin_Sentiment <- tempU45$x
+tempU45<-aggregate(Over45_DATA$syuzhet_sentiment, by=list(Over45_DATA$day), mean)
+Over45_Sentiment_Emotion$Syuzhet_sentiment <- tempU45$x
+
+tempEmotion<-aggregate(Over45_DATA$emotions$fear, by=list(Over45_DATA$day), mean)
+Over45_Sentiment_Emotion$fear<-tempEmotion$x
+tempEmotion<-aggregate(Over45_DATA$emotions$anticipation, by=list(Over45_DATA$day), mean)
+Over45_Sentiment_Emotion$Anticipation<-tempEmotion$x
+tempEmotion<-aggregate(Over45_DATA$emotions$disgust, by=list(Over45_DATA$day), mean)
+Over45_Sentiment_Emotion$disgust<-tempEmotion$x
+tempEmotion<-aggregate(Over45_DATA$emotions$joy, by=list(Over45_DATA$day), mean)
+Over45_Sentiment_Emotion$joy<-tempEmotion$x
+tempEmotion<-aggregate(Over45_DATA$emotions$sadness, by=list(Over45_DATA$day), mean)
+Over45_Sentiment_Emotion$sadness<-tempEmotion$x
+tempEmotion<-aggregate(Over45_DATA$emotions$surprise, by=list(Over45_DATA$day), mean)
+Over45_Sentiment_Emotion$surprise<-tempEmotion$x
+tempEmotion<-aggregate(Over45_DATA$emotions$trust, by=list(Over45_DATA$day), mean)
+Over45_Sentiment_Emotion$trust<-tempEmotion$x
+tempEmotion<-aggregate(Over45_DATA$emotions$anger, by=list(Over45_DATA$day), mean)
+Over45_Sentiment_Emotion$anger<-tempEmotion$x
+
+Over45_Sentiment_Emotion<-Over45_Sentiment_Emotion %>% 
+  rename(
+    Date = Group.1,
+    BingSentiment = x
+    )
+
+```
+
+
+Under & Over 45s Sentiment plotted
+---------------------------
+
+```{r}
+
+colors <- c("Under 45s" = "blue", "Over 45" = "red", "Syuzhet Under 45s" = "black")
+
+UO45_Sent_Bing<-ggplot(Under45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = BingSentiment, color = "Under 45s"), size = 1.5) +
+    geom_smooth(aes(y = Over45_Sentiment_Emotion$BingSentiment, color = "Over 45"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) + 
+    labs(x = "Time (Weeks 1-52)",
+         y = "(Mean Sentiment Values)",
+         title = paste(
+             "Bing Sentiment Levels for Under 45s vs Over 45s Aug 1st 20' - Mar 22nd 21'"
+        ) ,
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+
+UO45_Sent_Afin<-ggplot(Under45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = Afin_Sentiment, color = "Under 45s"), size = 1.5) +
+    geom_smooth(aes(y = Over45_Sentiment_Emotion$Afin_Sentiment, color = "Over 45"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) + 
+    labs(x = "Time (Weeks 1-52)",
+         y = "(Mean Sentiment Values)",
+         title = paste(
+            "Afin Sentiment Levels for Under 45s vs Over 45s Aug 1st 20' - Mar 22nd 21'"
+        ) ,
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+
+UO45_Sent_Syuzhet<-ggplot(Under45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = Syuzhet_sentiment, color = "Under 45s"), size = 1.5) +
+    geom_smooth(aes(y = Over45_Sentiment_Emotion$Syuzhet_sentiment, color = "Over 45"), size = 1.5) +    
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) + 
+    labs(x = "Time (Weeks 1-52)",
+         y = "(Mean Sentiment Values)",
+         title = paste(
+            "Syuzhet Sentiment Levels for Under 45s vs Over 45s Aug 1st 20' - Mar 22nd 21'"
+        ) ,
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+
+
+colors <- c("Afin Under 45" = "black", "Bing Under 45s" = "red", "Syuzhet Under 45s" = "orange", "Bing Over 45s" = "blue", "Afin Over 45s" = "white" ,"Syuzhet Over 45s" = "yellow")
+
+All_AgesSentiment<-ggplot(Under45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = BingSentiment, color = "Bing Under 45s"), size = 1) +
+    geom_smooth(aes(y = Afin_Sentiment, color = "Afin Under 45"), size = 1) +  
+geom_smooth(aes(y = Syuzhet_sentiment, color = "Syuzhet Under 45s"), size = 1) +  
+  geom_smooth(aes(y = Over45_Sentiment_Emotion$BingSentiment, color = "Bing Over 45s"), size = 1) +
+  geom_smooth(aes(y = Over45_Sentiment_Emotion$Afin_Sentiment, color = "Afin Over 45s"), size = 1) +
+  geom_smooth(aes(y = Over45_Sentiment_Emotion$Syuzhet_sentiment, color = "Syuzhet Over 45s"), size = 1) +
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time",
+         y = "(Mean Emotion Values)",
+         title = paste(
+            "All 3 Sentiment Methods for Age August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+
+```
+
+Below prints out the Sentiment graphs for Under 45s vs Over 45s
+
+```{r}
+print(UO45_Sent_Afin)
+print(UO45_Sent_Bing)
+print(UO45_Sent_Syuzhet)
+print(All_AgesSentiment)
+
+```
+
+All Under 45s Emotions
+----------------------------
+```{r}
+
+colors <- c("Fear" = "black", "Joy" = "red", "Sadness" = "orange", "Anticipation" = "blue", "Trust" = "white" ,"Disgust" = "yellow", "Surprise" = "purple", "Anger" = "brown")
+
+All_Under45s_Emotions<-ggplot(Under45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = fear, color = "Fear"), size = 1) +
+    geom_smooth(aes(y = Anticipation, color = "Anticipation"), size = 1) +  
+geom_smooth(aes(y = trust, color = "Trust"), size = 1) +  
+  geom_smooth(aes(y = disgust, color = "Disgust"), size = 1) +
+  geom_smooth(aes(y = joy, color = "Joy"), size = 1) +
+  geom_smooth(aes(y = sadness, color = "Sadness"), size = 1) +
+  geom_smooth(aes(y = surprise, color = "Surprise"), size = 1) +
+  geom_smooth(aes(y = anger, color = "Anger"), size = 1) +
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 0-52)",
+         y = "(Mean Emotion Values)",
+         title = paste(
+            "Twitter Emotion Levels for Under 45s Aug 1st 20' - Mar 22nd 21'"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+```
+
+All Over 45s Emotions
+------------------------------
+
+```{r}
+
+colors <- c("Fear" = "black", "Joy" = "red", "Sadness" = "orange", "Anticipation" = "blue", "Trust" = "white" ,"Disgust" = "yellow", "Surprise" = "purple", "Anger" = "brown")
+
+All_Over45s_Emotions<-ggplot(Over45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = fear, color = "Fear"), size = 1) +
+    geom_smooth(aes(y = Anticipation, color = "Anticipation"), size = 1) +  
+geom_smooth(aes(y = trust, color = "Trust"), size = 1) +  
+  geom_smooth(aes(y = disgust, color = "Disgust"), size = 1) +
+  geom_smooth(aes(y = joy, color = "Joy"), size = 1) +
+  geom_smooth(aes(y = sadness, color = "Sadness"), size = 1) +
+  geom_smooth(aes(y = surprise, color = "Surprise"), size = 1) +
+   geom_smooth(aes(y = anger, color = "Anger"), size = 1) +
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 0-52)",
+         y = "(Mean Emotion Values)",
+         title = paste(
+            "Twitter Emotion Levels for Over 45s Aug 1st 20' - Mar 22nd 21'"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+```
+
+
+```{r}
+print(All_Over45s_Emotions)
+print(All_Under45s_Emotions)
+```
+
+All under and over 45s emotions compared 
+---------
+```{r}
+# Fear
+
+colors <- c("Under 45s Fear" = "blue", "Over 45s Fear" = "red")
+
+UnderVSOver_fear<-ggplot(Over45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = fear, color = "Over 45s Fear"), size = 1.5) +
+    geom_smooth(aes(y = Under45_Sentiment_Emotion$fear, color = "Under 45s Fear"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+     labs(x = "Time (Weeks 0-52)",
+        y = "(Mean Emotion Value)",
+         title = paste(
+            "Twitter Fear Levels for Under 45s  & Over 45s Aug 1st 20' - Mar 22nd 21'"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+# Saddness
+    
+colors <- c("Under 45s Sadness" = "blue", "Over 45s Sadness" = "red")
+
+UnderVSOver_sad<-ggplot(Over45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = sadness, color = "Over 45s Sadness"), size = 1.5) +
+    geom_smooth(aes(y = Under45_Sentiment_Emotion$sadness, color = "Under 45s Sadness"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+   labs(x = "Time (Weeks 0-52)",
+        y = "(Mean Emotion Value)",
+         title = paste(
+            "Twitter Sadness Levels for Under 45s  & Over 45s Aug 1st 20' - Mar 22nd 21'"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+    
+    
+# Anticipation
+  
+colors <- c("Under 45s Anticipation" = "blue", "Over 45s Anticipation" = "red")
+
+UnderVSOver_Anticipation<-ggplot(Over45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = Anticipation, color = "Over 45s Anticipation"), size = 1.5) +
+    geom_smooth(aes(y = Under45_Sentiment_Emotion$Anticipation, color = "Under 45s Anticipation"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+     labs(x = "Time (Weeks 0-52)",
+        y = "(Mean Emotion Value)",
+         title = paste(
+            "Twitter Anticipation Levels for Under 45s  & Over 45s Aug 1st 20' - Mar 22nd 21'"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+    
+# Joy
+  
+colors <- c("Under 45s Joy" = "blue", "Over 45s Joy" = "red")
+
+UnderVSOver_joy<-ggplot(Over45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = joy, color = "Over 45s Joy"), size = 1.5) +
+    geom_smooth(aes(y = Under45_Sentiment_Emotion$joy, color = "Under 45s Joy"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 0-52)",
+         y = "(Mean Emotion Value)",
+         title = paste(
+            "Twitter Joy Levels for Under 45s  & Over 45s Aug 1st 20' - Mar 22nd 21'"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors)     
+
+# Disgust
+  
+colors <- c("Under 45s Disgust" = "blue", "Over 45s Disgust" = "red")
+
+UnderVSOver_disgust<-ggplot(Over45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = disgust, color = "Over 45s Disgust"), size = 1.5) +
+    geom_smooth(aes(y = Under45_Sentiment_Emotion$disgust, color = "Under 45s Disgust"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 0-52)",
+         y = "(Mean Emotion Value)",
+         title = paste(
+            "Twitter Disgust Levels for Under 45s  & Over 45s Aug 1st 20' - Mar 22nd 21'"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors)          
+    
+# trust
+  
+colors <- c("Under 45s Trust" = "blue", "Over 45s Trust" = "red")
+
+UnderVSOver_trust<-ggplot(Over45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = trust, color = "Over 45s Trust"), size = 1.5) +
+    geom_smooth(aes(y = Under45_Sentiment_Emotion$trust, color = "Under 45s Trust"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1))+
+    labs(x = "Time (Weeks 0-52)",
+        y = "(Mean Emotion Value)",
+         title = paste(
+            "Twitter Trust Levels for Under 45s  & Over 45s Aug 1st 20' - Mar 22nd 21'"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors)    
+    
+# Suprise
+  
+colors <- c("Under 45s Surprise" = "blue", "Over 45s Surprise" = "red")
+
+UnderVSOver_suprise<-ggplot(Over45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = surprise, color = "Over 45s Surprise"), size = 1.5) +
+    geom_smooth(aes(y = Under45_Sentiment_Emotion$surprise, color = "Under 45s Surprise"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 0-52)",
+        y = "(Mean Emotion Value)",
+         title = paste(
+            "Twitter Surprise Levels for Under 45s  & Over 45s Aug 1st 20' - Mar 22nd 21'"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors)         
+
+# Anger
+  
+colors <- c("Under 45s Anger" = "blue", "Over 45s Anger" = "red")
+
+UnderVSOver_anger<-ggplot(Over45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = anger, color = "Over 45s Anger"), size = 1.5) +
+    geom_smooth(aes(y = Under45_Sentiment_Emotion$anger, color = "Under 45s Anger"), size = 1.5) +           scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 0-52)",
+         y = "(Mean Emotion Value)",
+         title = paste(
+            "Twitter Anger Levels for Under 45s  & Over 45s Aug 1st 20' - Mar 22nd 21'"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors)          
+    
+```
+
+```{r}
+print(UnderVSOver_fear)
+print(UnderVSOver_disgust)
+print(UnderVSOver_joy)
+print(UnderVSOver_sad)
+print(UnderVSOver_suprise)
+print(UnderVSOver_Anticipation)
+print(UnderVSOver_trust)
+print(UnderVSOver_anger)
+```
+
+TOPIC - AGE & GENDER COMBINED ANALYSIS
+-----------------------------------------
+
+Will Now and try find sentiment levels for Under/ Over 45s Divided into Male & Female 
+------
+
+```{r}
+
+Under45femaleDATA<-joined_df[which(joined_df$Gender == "Female" & joined_df$under.Over45 == "Under45" ),names(joined_df) %in% c("text","created_at","bing_sentiment","afin_sentiment","syuzhet_sentiment","day")]
+
+Over45femaleDATA<-joined_df[which(joined_df$Gender == "Female" & joined_df$under.Over45 == "Over45" ),names(joined_df) %in% c("text","created_at","bing_sentiment","afin_sentiment","syuzhet_sentiment","day")]
+
+Over45maleDATA<-joined_df[which(joined_df$Gender == "Male" & joined_df$under.Over45 == "Over45" ),names(joined_df) %in% c("text","created_at","bing_sentiment","afin_sentiment","syuzhet_sentiment","day")]
+
+Under45maleDATA<-joined_df[which(joined_df$Gender == "Male" & joined_df$under.Over45 == "Under45" ),names(joined_df) %in% c("text","created_at","bing_sentiment","afin_sentiment","syuzhet_sentiment","day")]
+
+```
+
+Will Now investigate Male Under & Over 45s 
+------
+
+MALE OVER 45s Sentiment & Emotion Data set creation
+-------
+```{r}
+
+Over45maleDATA$emotions<-get_nrc_sentiment(Over45maleDATA$text)
+
+# use dplyr and mutate to add a day column to your data and chage the format to y-m-d
+#Under45_DATA$day<- as.Date(Under45_DATA$created_at, format = "%Y-%m-%d")
+
+#This then aggregates the days by the sum (Best to use mean cause volume wont be the same on everday)
+MaleOver45_Sentiment_Emotion<-aggregate(Over45maleDATA$bing_sentiment, by=list(Over45maleDATA$day), mean)
+tempU45<-aggregate(Over45maleDATA$afin_sentiment, by=list(Over45maleDATA$day), mean)
+MaleOver45_Sentiment_Emotion$Afin_Sentiment <- tempU45$x
+tempU45<-aggregate(Over45maleDATA$syuzhet_sentiment, by=list(Over45maleDATA$day), mean)
+MaleOver45_Sentiment_Emotion$Syuzhet_sentiment <- tempU45$x
+
+tempEmotion<-aggregate(Over45maleDATA$emotions$fear, by=list(Over45maleDATA$day), mean)
+MaleOver45_Sentiment_Emotion$fear<-tempEmotion$x
+tempEmotion<-aggregate(Over45maleDATA$emotions$anticipation, by=list(Over45maleDATA$day), mean)
+MaleOver45_Sentiment_Emotion$Anticipation<-tempEmotion$x
+tempEmotion<-aggregate(Over45maleDATA$emotions$disgust, by=list(Over45maleDATA$day), mean)
+MaleOver45_Sentiment_Emotion$disgust<-tempEmotion$x
+tempEmotion<-aggregate(Over45maleDATA$emotions$joy, by=list(Over45maleDATA$day), mean)
+MaleOver45_Sentiment_Emotion$joy<-tempEmotion$x
+tempEmotion<-aggregate(Over45maleDATA$emotions$sadness, by=list(Over45maleDATA$day), mean)
+MaleOver45_Sentiment_Emotion$sadness<-tempEmotion$x
+tempEmotion<-aggregate(Over45maleDATA$emotions$surprise, by=list(Over45maleDATA$day), mean)
+MaleOver45_Sentiment_Emotion$surprise<-tempEmotion$x
+tempEmotion<-aggregate(Over45maleDATA$emotions$trust, by=list(Over45maleDATA$day), mean)
+MaleOver45_Sentiment_Emotion$trust<-tempEmotion$x
+tempEmotion<-aggregate(Over45maleDATA$emotions$anger, by=list(Over45maleDATA$day), mean)
+MaleOver45_Sentiment_Emotion$anger<-tempEmotion$x
+
+MaleOver45_Sentiment_Emotion<-MaleOver45_Sentiment_Emotion %>% 
+  rename(
+    Date = Group.1,
+    BingSentiment = x
+    )
+
+```
+
+MALE UNDER 45s Sentiment & Emotion Data set creation
+---------
+
+```{r}
+
+Under45maleDATA$emotions<-get_nrc_sentiment(Under45maleDATA$text)
+
+# use dplyr and mutate to add a day column to your data and chage the format to y-m-d
+#Under45_DATA$day<- as.Date(Under45_DATA$created_at, format = "%Y-%m-%d")
+
+#This then aggregates the days by the sum (Best to use mean cause volume wont be the same on everday)
+MaleUnder45_Sentiment_Emotion<-aggregate(Under45maleDATA$bing_sentiment, by=list(Under45maleDATA$day), mean)
+tempU45<-aggregate(Under45maleDATA$afin_sentiment, by=list(Under45maleDATA$day), mean)
+MaleUnder45_Sentiment_Emotion$Afin_Sentiment <- tempU45$x
+tempU45<-aggregate(Under45maleDATA$syuzhet_sentiment, by=list(Under45maleDATA$day), mean)
+MaleUnder45_Sentiment_Emotion$Syuzhet_sentiment <- tempU45$x
+
+tempEmotion<-aggregate(Under45maleDATA$emotions$fear, by=list(Under45maleDATA$day), mean)
+MaleUnder45_Sentiment_Emotion$fear<-tempEmotion$x
+tempEmotion<-aggregate(Under45maleDATA$emotions$anticipation, by=list(Under45maleDATA$day), mean)
+MaleUnder45_Sentiment_Emotion$Anticipation<-tempEmotion$x
+tempEmotion<-aggregate(Under45maleDATA$emotions$disgust, by=list(Under45maleDATA$day), mean)
+MaleUnder45_Sentiment_Emotion$disgust<-tempEmotion$x
+tempEmotion<-aggregate(Under45maleDATA$emotions$joy, by=list(Under45maleDATA$day), mean)
+MaleUnder45_Sentiment_Emotion$joy<-tempEmotion$x
+tempEmotion<-aggregate(Under45maleDATA$emotions$sadness, by=list(Under45maleDATA$day), mean)
+MaleUnder45_Sentiment_Emotion$sadness<-tempEmotion$x
+tempEmotion<-aggregate(Under45maleDATA$emotions$surprise, by=list(Under45maleDATA$day), mean)
+MaleUnder45_Sentiment_Emotion$surprise<-tempEmotion$x
+tempEmotion<-aggregate(Under45maleDATA$emotions$trust, by=list(Under45maleDATA$day), mean)
+MaleUnder45_Sentiment_Emotion$trust<-tempEmotion$x
+tempEmotion<-aggregate(Under45maleDATA$emotions$anger, by=list(Under45maleDATA$day), mean)
+MaleUnder45_Sentiment_Emotion$anger<-tempEmotion$x
+
+MaleUnder45_Sentiment_Emotion<-MaleUnder45_Sentiment_Emotion %>% 
+  rename(
+    Date = Group.1,
+    BingSentiment = x
+    )
+
+```
+
+
+FEMALE UNDER 45s Sentiment & Emotion Data set creation
+---------------
+
+```{r}
+
+Under45femaleDATA$emotions<-get_nrc_sentiment(Under45femaleDATA$text)
+
+# use dplyr and mutate to add a day column to your data and chage the format to y-m-d
+#Under45_DATA$day<- as.Date(Under45_DATA$created_at, format = "%Y-%m-%d")
+
+#This then aggregates the days by the sum (Best to use mean cause volume wont be the same on everday)
+FemaleUnder45_Sentiment_Emotion<-aggregate(Under45femaleDATA$bing_sentiment, by=list(Under45femaleDATA$day), mean)
+tempU45<-aggregate(Under45femaleDATA$afin_sentiment, by=list(Under45femaleDATA$day), mean)
+FemaleUnder45_Sentiment_Emotion$Afin_Sentiment <- tempU45$x
+tempU45<-aggregate(Under45femaleDATA$syuzhet_sentiment, by=list(Under45femaleDATA$day), mean)
+FemaleUnder45_Sentiment_Emotion$Syuzhet_sentiment <- tempU45$x
+
+tempEmotion<-aggregate(Under45femaleDATA$emotions$fear, by=list(Under45femaleDATA$day), mean)
+FemaleUnder45_Sentiment_Emotion$fear<-tempEmotion$x
+tempEmotion<-aggregate(Under45femaleDATA$emotions$anticipation, by=list(Under45femaleDATA$day), mean)
+FemaleUnder45_Sentiment_Emotion$Anticipation<-tempEmotion$x
+tempEmotion<-aggregate(Under45femaleDATA$emotions$disgust, by=list(Under45femaleDATA$day), mean)
+FemaleUnder45_Sentiment_Emotion$disgust<-tempEmotion$x
+tempEmotion<-aggregate(Under45femaleDATA$emotions$joy, by=list(Under45femaleDATA$day), mean)
+FemaleUnder45_Sentiment_Emotion$joy<-tempEmotion$x
+tempEmotion<-aggregate(Under45femaleDATA$emotions$sadness, by=list(Under45femaleDATA$day), mean)
+FemaleUnder45_Sentiment_Emotion$sadness<-tempEmotion$x
+tempEmotion<-aggregate(Under45femaleDATA$emotions$surprise, by=list(Under45femaleDATA$day), mean)
+FemaleUnder45_Sentiment_Emotion$surprise<-tempEmotion$x
+tempEmotion<-aggregate(Under45femaleDATA$emotions$trust, by=list(Under45femaleDATA$day), mean)
+FemaleUnder45_Sentiment_Emotion$trust<-tempEmotion$x
+tempEmotion<-aggregate(Under45femaleDATA$emotions$anger, by=list(Under45femaleDATA$day), mean)
+FemaleUnder45_Sentiment_Emotion$anger<-tempEmotion$x
+
+FemaleUnder45_Sentiment_Emotion<-FemaleUnder45_Sentiment_Emotion %>% 
+  rename(
+    Date = Group.1,
+    BingSentiment = x
+    )
+
+```
+
+
+FEMALE Over 45s Sentiment & Emotion Data set creation
+----------------
+
+```{r}
+
+Over45femaleDATA$emotions<-get_nrc_sentiment(Over45femaleDATA$text)
+
+# use dplyr and mutate to add a day column to your data and chage the format to y-m-d
+#Under45_DATA$day<- as.Date(Under45_DATA$created_at, format = "%Y-%m-%d")
+
+#This then aggregates the days by the sum (Best to use mean cause volume wont be the same on everday)
+FemaleOver45_Sentiment_Emotion<-aggregate(Over45femaleDATA$bing_sentiment, by=list(Over45femaleDATA$day), mean)
+tempU45<-aggregate(Over45femaleDATA$afin_sentiment, by=list(Over45femaleDATA$day), mean)
+FemaleOver45_Sentiment_Emotion$Afin_Sentiment <- tempU45$x
+tempU45<-aggregate(Over45femaleDATA$syuzhet_sentiment, by=list(Over45femaleDATA$day), mean)
+FemaleOver45_Sentiment_Emotion$Syuzhet_sentiment <- tempU45$x
+
+tempEmotion<-aggregate(Over45femaleDATA$emotions$fear, by=list(Over45femaleDATA$day), mean)
+FemaleOver45_Sentiment_Emotion$fear<-tempEmotion$x
+tempEmotion<-aggregate(Over45femaleDATA$emotions$anticipation, by=list(Over45femaleDATA$day), mean)
+FemaleOver45_Sentiment_Emotion$Anticipation<-tempEmotion$x
+tempEmotion<-aggregate(Over45femaleDATA$emotions$disgust, by=list(Over45femaleDATA$day), mean)
+FemaleOver45_Sentiment_Emotion$disgust<-tempEmotion$x
+tempEmotion<-aggregate(Over45femaleDATA$emotions$joy, by=list(Over45femaleDATA$day), mean)
+FemaleOver45_Sentiment_Emotion$joy<-tempEmotion$x
+tempEmotion<-aggregate(Over45femaleDATA$emotions$sadness, by=list(Over45femaleDATA$day), mean)
+FemaleOver45_Sentiment_Emotion$sadness<-tempEmotion$x
+tempEmotion<-aggregate(Over45femaleDATA$emotions$surprise, by=list(Over45femaleDATA$day), mean)
+FemaleOver45_Sentiment_Emotion$surprise<-tempEmotion$x
+tempEmotion<-aggregate(Over45femaleDATA$emotions$trust, by=list(Over45femaleDATA$day), mean)
+FemaleOver45_Sentiment_Emotion$trust<-tempEmotion$x
+tempEmotion<-aggregate(Over45femaleDATA$emotions$anger, by=list(Over45femaleDATA$day), mean)
+FemaleOver45_Sentiment_Emotion$anger<-tempEmotion$x
+
+FemaleOver45_Sentiment_Emotion<-FemaleOver45_Sentiment_Emotion %>% 
+  rename(
+    Date = Group.1,
+    BingSentiment = x
+    )
+
+```
+
+Each AGE & Gender groups emotions.
+------------------------------
+
+Female Over 45s Emotions
+------------------
+
+```{r}
+
+colors <- c("Fear" = "black", "Joy" = "red", "Sadness" = "orange", "Anticipation" = "blue", "trust" = "white" ,"disgust" = "yellow", "surprise" = "purple", "anger" = "brown")
+
+All_FemaleOver45s_Emotions<-ggplot(FemaleOver45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = fear, color = "Fear"), size = 1) +
+    geom_smooth(aes(y = Anticipation, color = "Anticipation"), size = 1) +  
+geom_smooth(aes(y = trust, color = "trust"), size = 1) +  
+  geom_smooth(aes(y = disgust, color = "disgust"), size = 1) +
+  geom_smooth(aes(y = joy, color = "Joy"), size = 1) +
+  geom_smooth(aes(y = sadness, color = "Sadness"), size = 1) +
+  geom_smooth(aes(y = surprise, color = "surprise"), size = 1) +
+   geom_smooth(aes(y = anger, color = "anger"), size = 1) +
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 1-52)",
+         y = "(Mean Emotion Values)",
+         title = paste(
+            "Twitter Emotion Levels for Female Over 45s Aug 1st 20' - Mar 22nd 21'"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+```
+
+Female Under 45s Emotions
+------------------
+
+```{r}
+
+colors <- c("Fear" = "black", "Joy" = "red", "Sadness" = "orange", "Anticipation" = "blue", "trust" = "white" ,"disgust" = "yellow", "surprise" = "purple", "anger" = "brown")
+
+All_FemaleUnder45s_Emotions<-ggplot(FemaleUnder45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = fear, color = "Fear"), size = 1) +
+    geom_smooth(aes(y = Anticipation, color = "Anticipation"), size = 1) +  
+geom_smooth(aes(y = trust, color = "trust"), size = 1) +  
+  geom_smooth(aes(y = disgust, color = "disgust"), size = 1) +
+  geom_smooth(aes(y = joy, color = "Joy"), size = 1) +
+  geom_smooth(aes(y = sadness, color = "Sadness"), size = 1) +
+  geom_smooth(aes(y = surprise, color = "surprise"), size = 1) +
+   geom_smooth(aes(y = anger, color = "anger"), size = 1) +
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 1-52)",
+         y = "(Mean Emotion Values)",
+         title = paste(
+            "Twitter Emotion Levels for Female Under 45s Aug 1st 20' - Mar 22nd 21'"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+```
+
+Male Over 45s Emotions
+------------------
+
+```{r}
+
+colors <- c("Fear" = "black", "Joy" = "red", "Sadness" = "orange", "Anticipation" = "blue", "trust" = "white" ,"disgust" = "yellow", "surprise" = "purple", "anger" = "brown")
+
+All_MaleOver45s_Emotions<-ggplot(MaleOver45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = fear, color = "Fear"), size = 1) +
+    geom_smooth(aes(y = Anticipation, color = "Anticipation"), size = 1) +  
+geom_smooth(aes(y = trust, color = "trust"), size = 1) +  
+  geom_smooth(aes(y = disgust, color = "disgust"), size = 1) +
+  geom_smooth(aes(y = joy, color = "Joy"), size = 1) +
+  geom_smooth(aes(y = sadness, color = "Sadness"), size = 1) +
+  geom_smooth(aes(y = surprise, color = "surprise"), size = 1) +
+   geom_smooth(aes(y = anger, color = "anger"), size = 1) +
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 1-52)",
+         y = "(Mean Emotion Values)",
+         title = paste(
+            "Twitter Emotion Levels for Male Over 45s Aug 1st 20' - Mar 22nd 21'"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+```
+
+Male Under 45s Emotions
+------------------
+
+```{r}
+
+colors <- c("Fear" = "black", "Joy" = "red", "Sadness" = "orange", "Anticipation" = "blue", "trust" = "white" ,"disgust" = "yellow", "surprise" = "purple", "anger" = "brown")
+
+All_MaleUnder45s_Emotions<-ggplot(FemaleOver45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = fear, color = "Fear"), size = 1) +
+    geom_smooth(aes(y = Anticipation, color = "Anticipation"), size = 1) +  
+geom_smooth(aes(y = trust, color = "trust"), size = 1) +  
+  geom_smooth(aes(y = disgust, color = "disgust"), size = 1) +
+  geom_smooth(aes(y = joy, color = "Joy"), size = 1) +
+  geom_smooth(aes(y = sadness, color = "Sadness"), size = 1) +
+  geom_smooth(aes(y = surprise, color = "surprise"), size = 1) +
+   geom_smooth(aes(y = anger, color = "anger"), size = 1) +
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 1-52)",
+         y = "(Mean Emotion Values)",
+         title = paste(
+            "Twitter Emotion Levels for Male Under 45s Aug 1st 20' - Mar 22nd 21'"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+```
+
+
+```{r}
+print(All_FemaleOver45s_Emotions)
+print(All_FemaleUnder45s_Emotions)
+print(All_MaleOver45s_Emotions)
+print(All_MaleUnder45s_Emotions)
+```
+
+
+
+Will now compare the diffrent gender combined with age Sentiment plots
+------------
+
+```{r}
+
+colors <- c("Female Over 45s" = "blue", "Male Over 45s" = "red", "Male Under 45s" = "orange", "Female Under 45s" = "green")
+
+Over45Gender_Sent_Bing<-ggplot(FemaleOver45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = BingSentiment, color = "Female Over 45s"), size = 1.5) +
+    geom_smooth(aes(y = MaleOver45_Sentiment_Emotion$BingSentiment, color = "Male Over 45s"), size = 1.5) + 
+  geom_smooth(aes(y = MaleUnder45_Sentiment_Emotion$BingSentiment, color = "Male Under 45s"), size = 1.5) +
+  geom_smooth(aes(y = FemaleUnder45_Sentiment_Emotion$BingSentiment, color = "Female Under 45s"), size = 1.5) +
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) + 
+    labs(x = "Time (Weeks 1-52)",
+         y = "(Mean Sentiment Values)",
+         title = paste(
+            "Bing Sentiment Levels for Age & Gender Aug 1st 20' - Mar 22nd 21'"
+        ) ,
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+
+Over45Gender_Sent_Afin<-ggplot(FemaleOver45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = Afin_Sentiment, color = "Female Over 45s"), size = 1.5) +
+    geom_smooth(aes(y = MaleOver45_Sentiment_Emotion$Afin_Sentiment, color = "Male Over 45s"), size = 1.5) +  
+  geom_smooth(aes(y = MaleUnder45_Sentiment_Emotion$Afin_Sentiment, color = "Male Under 45s"), size = 1.5) +
+  geom_smooth(aes(y = FemaleUnder45_Sentiment_Emotion$Afin_Sentiment, color = "Female Under 45s"), size = 1.5) +
+  
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) + 
+    labs(x = "Time (Weeks 1-52)",
+         y = "(Mean Sentiment Values)",
+         title = paste(
+             "Afin Sentiment Levels for Age & Gender Aug 1st 20' - Mar 22nd 21'"
+        ) ,
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+
+Over45Gender_Sent_Syuzhet<-ggplot(FemaleOver45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = Syuzhet_sentiment, color = "Female Over 45s"), size = 1.5) +
+    geom_smooth(aes(y = MaleOver45_Sentiment_Emotion$Syuzhet_sentiment, color = "Male Over 45s"), size = 1.5) +   
+  geom_smooth(aes(y = MaleUnder45_Sentiment_Emotion$Syuzhet_sentiment, color = "Male Under 45s"), size = 1.5) +
+  geom_smooth(aes(y = FemaleUnder45_Sentiment_Emotion$Syuzhet_sentiment, color = "Female Under 45s"), size = 1.5) +
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) + 
+    labs(x = "Time (Weeks 1-52)",
+         y = "(Mean Sentiment Values)",
+         title = paste(
+            "Syuzhet Sentiment Levels for Age & Gender Aug 1st 20' - Mar 22nd 21'"
+        ) ,
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+
+
+```
+
+```{r}
+print(Over45Gender_Sent_Afin)
+print(Over45Gender_Sent_Bing)
+print(Over45Gender_Sent_Syuzhet)
+```
+
+Will now compare the diffrent genders combined with age for Emotions
+---------------
+
+```{r}
+# Fear
+
+colors <- c("Male Under 45s Fear" = "blue", "Female Over 45s Fear" = "red", "Male Over 45s Fear" = "orange", "Female Under 45s Fear" = "green" )
+
+GenderUnderVSOver_fear<-ggplot(FemaleOver45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = fear, color = "Female Over 45s Fear"), size = 1.5) +
+    geom_smooth(aes(y = MaleUnder45_Sentiment_Emotion$fear, color = "Male Under 45s Fear"), size = 1.5) +  
+   geom_smooth(aes(y = MaleOver45_Sentiment_Emotion$fear, color = "Male Over 45s Fear"), size = 1.5) +
+   geom_smooth(aes(y = FemaleUnder45_Sentiment_Emotion$fear, color = "Female Under 45s Fear"), size = 1.5) +
+  
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 1-52)",
+         y = "(Emotion Level)",
+         title = paste(
+            "Twitter Fear Levels for Males vs Females  August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+
+# Sadness
+    
+colors <- c("Male Under 45s Sadness" = "blue", "Female Over 45s Sadness" = "red", "Male Over 45s Sadness" = "orange", "Female Under 45s Sadness" = "green" )
+
+GenderUnderVSOver_sad<-ggplot(FemaleOver45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = sadness, color = "Female Over 45s Sadness"), size = 1.5) +
+    geom_smooth(aes(y = MaleUnder45_Sentiment_Emotion$sadness, color = "Male Under 45s Sadness"), size = 1.5) + 
+  geom_smooth(aes(y = MaleOver45_Sentiment_Emotion$fear, color = "Male Over 45s Sadness"), size = 1.5) +
+   geom_smooth(aes(y = FemaleUnder45_Sentiment_Emotion$fear, color = "Female Under 45s Sadness"), size = 1.5) +
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 1-52)",
+         y = "(Emotion Level)",
+         title = paste(
+            "Twitter Saddness Levels for Males vs Females August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+    
+    
+
+  
+colors <- c("Male Under 45s Anticipation" = "blue", "Female Over 45s Anticipation" = "red", "Male Over 45s Anticipation" = "orange", "Female Under 45s Anticipation" = "green" )
+
+GenderUnderVSOver_Anticipation<-ggplot(FemaleOver45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = Anticipation, color = "Female Over 45s Anticipation"), size = 1.5) +
+    geom_smooth(aes(y = MaleUnder45_Sentiment_Emotion$Anticipation, color = "Male Under 45s Anticipation"), size = 1.5) +  
+  geom_smooth(aes(y = MaleOver45_Sentiment_Emotion$fear, color = "Male Over 45s Anticipation"), size = 1.5) +
+   geom_smooth(aes(y = FemaleUnder45_Sentiment_Emotion$fear, color = "Female Under 45s Anticipation"), size = 1.5) +
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 1-52)",
+         y = "(Emotion Level)",
+         title = paste(
+            "Twitter Anticipation Levels for Males vs Females August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors) 
+    
+# Joy
+  
+colors <- c("Male Under 45s Joy" = "blue", "Female Over 45s Joy" = "red", "Male Over 45s Joy" = "orange", "Female Under 45s Joy" = "green" )
+
+GenderUnderVSOver_joy<-ggplot(FemaleOver45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = joy, color = "Female Over 45s Joy"), size = 1.5) +
+    geom_smooth(aes(y = MaleUnder45_Sentiment_Emotion$joy, color = "Male Under 45s Joy"), size = 1.5) +  
+  geom_smooth(aes(y = MaleOver45_Sentiment_Emotion$fear, color = "Male Over 45s Joy"), size = 1.5) +
+   geom_smooth(aes(y = FemaleUnder45_Sentiment_Emotion$fear, color = "Female Under 45s Joy"), size = 1.5) +
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 1-52)",
+         y = "(Emotion Level)",
+         title = paste(
+            "Twitter joy Levels for Males vs Females August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors)     
+
+# Disgust
+  
+colors <- c("Male Under 45s disgust" = "blue", "Female Over 45s disgust" = "red", "Male Over 45s disgust" = "orange", "Female Under 45s disgust" = "green" )
+
+GenderUnderVSOver_disgust<-ggplot(FemaleOver45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = disgust, color = "Female Over 45s disgust"), size = 1.5) +
+    geom_smooth(aes(y = MaleUnder45_Sentiment_Emotion$disgust, color = "Male Under 45s disgust"), size = 1.5) +  
+  geom_smooth(aes(y = MaleOver45_Sentiment_Emotion$fear, color = "Male Over 45s disgust"), size = 1.5) +
+   geom_smooth(aes(y = FemaleUnder45_Sentiment_Emotion$fear, color = "Female Under 45s disgust"), size = 1.5) +
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 1-52)",
+         y = "(Emotion Level)",
+         title = paste(
+            "Twitter disgust Levels for Males vs Females August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors)          
+    
+# trust
+  
+colors <- c("Male Under 45s trust" = "blue", "Female Over 45s trust" = "red", "Male Over 45s trust" = "orange", "Female Under 45s trust" = "green" )
+
+GenderUnderVSOver_trust<-ggplot(FemaleOver45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = trust, color = "Female Over 45s trust"), size = 1.5) +
+    geom_smooth(aes(y = MaleUnder45_Sentiment_Emotion$trust, color = "Male Under 45s trust"), size = 1.5) +  
+  geom_smooth(aes(y = MaleOver45_Sentiment_Emotion$fear, color = "Male Over 45s trust"), size = 1.5) +
+   geom_smooth(aes(y = FemaleUnder45_Sentiment_Emotion$fear, color = "Female Under 45s trust"), size = 1.5) +
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1))+
+    labs(x = "Time (Weeks 1-52)",
+         y = "(Emotion Level)",
+         title = paste(
+            "Twitter trust Levels for Males vs Females August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors)    
+    
+# Suprise
+  
+colors <- c("Male Under 45s surprise" = "blue", "Female Over 45s surprise" = "red", "Male Over 45s surprise" = "orange", "Female Under 45s surprise" = "green" )
+
+GenderUnderVSOver_suprise<-ggplot(FemaleOver45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = surprise, color = "Female Over 45s surprise"), size = 1.5) +
+    geom_smooth(aes(y = MaleUnder45_Sentiment_Emotion$surprise, color = "Male Under 45s surprise"), size = 1.5) +  
+  geom_smooth(aes(y = MaleOver45_Sentiment_Emotion$fear, color = "Male Over 45s surprise"), size = 1.5) +
+   geom_smooth(aes(y = FemaleUnder45_Sentiment_Emotion$fear, color = "Female Under 45s surprise"), size = 1.5) +
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 1-52)",
+         y = "(Emotion Level)",
+         title = paste(
+            "Twitter surpise Levels for Males vs Females August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors)         
+
+# Anger
+  
+colors <- c("Male Under 45s anger" = "blue", "Female Over 45s anger" = "red", "Male Over 45s anger" = "orange", "Female Under 45s anger" = "green" )
+
+GenderUnderVSOver_anger<-ggplot(FemaleOver45_Sentiment_Emotion, aes(x = Date)) +
+    geom_smooth(aes(y = anger, color = "Female Over 45s anger"), size = 1.5) +
+    geom_smooth(aes(y = MaleUnder45_Sentiment_Emotion$anger, color = "Male Under 45s anger"), size = 1.5) +  
+  geom_smooth(aes(y = MaleOver45_Sentiment_Emotion$fear, color = "Male Over 45s anger"), size = 1.5) +
+   geom_smooth(aes(y = FemaleUnder45_Sentiment_Emotion$fear, color = "Female Under 45s anger"), size = 1.5) +
+  scale_x_date(date_labels = "%Y %b %U",date_breaks  ="1 week") +
+    theme(axis.text.x=element_text(angle=60, hjust=1)) +
+    labs(x = "Time (Weeks 1-52)",
+         y = "(Emotion Level)",
+         title = paste(
+            "Twitter Anger Levels for Males vs Females August 1st 2020 - March 22nd 2021"
+        ),
+         color = "Legend") +
+    scale_color_manual(values = colors)    
+
+
+```
+
+```{r}
+print(GenderUnderVSOver_Anticipation)
+print(GenderUnderVSOver_anger)
+print(GenderUnderVSOver_disgust)
+print(GenderUnderVSOver_fear)
+print(GenderUnderVSOver_joy)
+print(GenderUnderVSOver_sad)
+print(GenderUnderVSOver_suprise)
+print(GenderUnderVSOver_trust)
+```
+
+TOPIC - Word Frequency & Words Clouds
+-------------------------------
+
+```{r}
+
+TextDoc <- Corpus(VectorSource(joined_df$NewTweet$text))
+
+# Build a term-document matrix
+TextDoc_dtm <- TermDocumentMatrix(TextDoc)
+dtm_m <- as.matrix(TextDoc_dtm)
+# Sort by descearing value of frequency
+dtm_v <- sort(rowSums(dtm_m),decreasing=TRUE)
+dtm_d <- data.frame(word = names(dtm_v),freq=dtm_v)
+# Display the top 5 most frequent words
+head(dtm_d, 50)
+```
+
+WORD FREQUENCY TOP WORDS - All Data
+---------------------
+
+# Top Words All Data
+```{r}
+# Plot the most frequent words
+AllDataTopWords<-barplot(dtm_d[1:10,]$freq, las = 2, names.arg = dtm_d[1:10,]$word,
+        col ="lightgreen", main ="Top 10 most frequent words",
+        ylab = "Word frequencies")
+```
+
+WORD CLOUDS Top Words - All Data
+-----------------
+```{r}
+#generate word cloud
+set.seed(1234)
+wordcloud(words = dtm_d$word, freq = dtm_d$freq, min.freq = 10,
+          max.words=100, random.order=FALSE, rot.per=0.40, 
+          colors=brewer.pal(8, "Dark2"))
+```
+
+
+# MALE GENDER 
+```{r}
+
+TextDoc <- Corpus(VectorSource(maleDATA$proTweet))
+
+# Build a term-document matrix
+TextDoc_dtm <- TermDocumentMatrix(TextDoc)
+dtm_m <- as.matrix(TextDoc_dtm)
+# Sort by descearing value of frequency
+dtm_v <- sort(rowSums(dtm_m),decreasing=TRUE)
+dtm_d <- data.frame(word = names(dtm_v),freq=dtm_v)
+# Display the top 5 most frequent words
+head(dtm_d, 50)
+```
+
+```{r}
+# Plot the most frequent words
+AllDataTopWords<-barplot(dtm_d[1:20,]$freq, las = 2, names.arg = dtm_d[1:20,]$word,
+        col ="lightgreen", main ="Top 10 most frequent words",
+        ylab = "Word frequencies")
+```
+
+```{r}
+#generate word cloud
+set.seed(1234)
+wordcloud(words = dtm_d$word, freq = dtm_d$freq, min.freq = 10,
+          max.words=100, random.order=FALSE, rot.per=0.40, 
+          colors=brewer.pal(8, "Dark2"))
+```
+
+# FEMALE ANALYSIS
+
+```{r}
+
+TextDoc <- Corpus(VectorSource(femaleDATA$proTweet))
+
+# Build a term-document matrix
+TextDoc_dtm <- TermDocumentMatrix(TextDoc)
+dtm_m <- as.matrix(TextDoc_dtm)
+# Sort by descearing value of frequency
+dtm_v <- sort(rowSums(dtm_m),decreasing=TRUE)
+dtm_d <- data.frame(word = names(dtm_v),freq=dtm_v)
+# Display the top 5 most frequent words
+head(dtm_d, 50)
+```
+
+```{r}
+# Plot the most frequent words
+barplot(dtm_d[1:50,]$freq, las = 2, names.arg = dtm_d[1:50,]$word,
+        col ="lightgreen", main ="Top 10 most frequent words",
+        ylab = "Word frequencies")
+```
+
+```{r}
+#generate word cloud
+set.seed(1234)
+wordcloud(words = dtm_d$word, freq = dtm_d$freq, min.freq = 100,
+          max.words=100, random.order=FALSE, rot.per=0.40, 
+          colors=brewer.pal(8, "Dark2"))
+```
+
+AGE Word Analysis
+-----------------
+
+
+#Under 45s Data
+
+```{r}
+
+TextDoc <- Corpus(VectorSource(Under45_DATA$proTweet))
+
+# Build a term-document matrix
+TextDoc_dtm <- TermDocumentMatrix(TextDoc)
+dtm_m <- as.matrix(TextDoc_dtm)
+# Sort by descearing value of frequency
+dtm_v <- sort(rowSums(dtm_m),decreasing=TRUE)
+dtm_d <- data.frame(word = names(dtm_v),freq=dtm_v)
+# Display the top 5 most frequent words
+head(dtm_d, 50)
+```
+
+```{r}
+# Plot the most frequent words
+barplot(dtm_d[10:50,]$freq, las = 2, names.arg = dtm_d[10:50,]$word,
+        col ="lightgreen", main ="Top 10 most frequent words",
+        ylab = "Word frequencies")
+```
+
+```{r}
+#generate word cloud
+set.seed(1234)
+wordcloud(words = dtm_d$word, freq = dtm_d$freq, min.freq = 100,
+          max.words=100, random.order=FALSE, rot.per=0.40, 
+          colors=brewer.pal(8, "Dark2"))
+```
+
+#Over 45s Data
+
+```{r}
+
+TextDoc <- Corpus(VectorSource(Over45_DATA$proTweet))
+
+# Build a term-document matrix
+TextDoc_dtm <- TermDocumentMatrix(TextDoc)
+dtm_m <- as.matrix(TextDoc_dtm)
+# Sort by descearing value of frequency
+dtm_v <- sort(rowSums(dtm_m),decreasing=TRUE)
+dtm_d <- data.frame(word = names(dtm_v),freq=dtm_v)
+# Display the top 5 most frequent words
+head(dtm_d, 50)
+```
+
+```{r}
+# Plot the most frequent words
+barplot(dtm_d[10:50,]$freq, las = 2, names.arg = dtm_d[10:50,]$word,
+        col ="lightgreen", main ="Top 10 most frequent words",
+        ylab = "Word frequencies")
+```
+
+```{r}
+#generate word cloud
+set.seed(1234)
+wordcloud(words = dtm_d$word, freq = dtm_d$freq, scale = c(2.5, 0.5) ,min.freq = 100,
+          max.words=100, random.order=FALSE, rot.per=0.40, 
+          colors=brewer.pal(8, "Dark2"))
+```
